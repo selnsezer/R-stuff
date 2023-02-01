@@ -1,0 +1,295 @@
+---
+title: "HW-4"
+author: "Selin Sezer"
+date: "2022-08-21"
+output: html_document
+---
+
+```{r, eval=FALSE}
+
+#Download the COAD RNAseq Data
+
+query <- GDCquery(
+  project = "TCGA-COAD",
+  data.category = "Transcriptome Profiling",
+  data.type = "Gene Expression Quantification", 
+  workflow.type = "STAR - Counts")
+
+GDCdownload(query = query)
+
+coad_rna <- GDCprepare(query = query)
+
+saveRDS(coad_rna, "coad_rna.rds")
+
+
+```
+
+```{r, eval=FALSE}
+
+#Download the COAD MiRNAseq Data
+
+query <- GDCquery(
+  project = "TCGA-COAD",
+  data.category = "Transcriptome Profiling",
+  data.type = "miRNA Expression Quantification")
+
+
+GDCdownload(query = query)
+
+coad_mir <- GDCprepare(query = query)
+
+saveRDS(coad_mir, "coad_mir.rds")
+
+```
+
+
+```{r, eval=FALSE}
+
+# Subtype Information
+
+coad_subtype <- TCGAquery_subtype("COAD")
+
+saveRDS(coad_subtype, "coad_subtype.rds")
+
+```
+
+
+
+```{r}
+library(tidyverse)
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(dplyr)
+library(edgeR)
+
+#Explore Data
+
+coad_rna <- readRDS("coad_rna.rds")
+
+coad_mir <- readRDS("coad_mir.rds")
+
+coad_subtype <- readRDS("coad_subtype.rds")
+
+
+```
+ 
+```{r}
+
+#Extract RNAseq Data
+
+rna_c <- assay(coad_rna)
+
+rna_c[1:3, 1:3]
+
+```
+```{r}
+
+# Extract Gene Information
+
+gene_data_c <- as.data.frame(rowData(coad_rna))
+
+#Duplication Finding
+
+anyDuplicated(gene_data_c$gene_id)
+
+anyDuplicated(gene_data_c$gene_name)
+
+sum(duplicated(gene_data_c$gene_name))
+
+dup_genes <- duplicated(gene_data_c$gene_name)| duplicated(gene_data_c$gene_name, fromLast=F)
+ 
+```
+
+
+```{r}
+
+#Dealing with Duplicate gene_name
+
+#New column create with mutate function including duplicate data and new column create with mutate and case_when(vectorised if)
+# make.names function: Make syntactically valid names out of character vectors.
+
+gene_data_c <- gene_data_c %>% 
+  mutate(duplicated_name = duplicated(gene_name) | duplicated(gene_name, fromLast=T)) %>% 
+  mutate(new_name = case_when(
+    duplicated_name == TRUE ~ paste(gene_name, gene_id, sep = "_"),
+    duplicated_name == FALSE ~ gene_name)) %>% 
+  mutate(new_name = make.names(new_name))
+
+
+anyDuplicated(gene_data_c$gene_name)
+anyDuplicated(gene_data_c$new_name)
+
+
+```
+
+
+```{r}
+
+norm_rna_c <- edgeR::cpm(rna_c)
+
+norm_rna_c <- log(norm_rna_c+1, base = 10)
+
+identical(rownames(norm_rna_c), gene_data_c$gene_id)
+
+rownames(norm_rna_c) <- gene_data_c$new_name
+
+```
+
+
+```{r}
+
+# Extract Patient Data
+
+patient_data_c <- as.data.frame(colData(coad_rna))
+
+anyDuplicated(patient_data_c$patient)
+
+which(duplicated(patient_data_c$patient))
+
+which(duplicated(patient_data_c$patient) | duplicated(patient_data_c$patient, fromLast=T))
+
+dup_patients_c <- which(duplicated(patient_data_c$patient) | duplicated(patient_data_c$patient, fromLast=T))
+
+View(patient_data_c[dup_patients_c, ])
+
+```
+
+
+```{r}
+
+# Extract miRNAseq Data
+#grep: A function that finding string
+# ignore.case: ignore uppercase and lowercase, x: search area, pattern: searching thing, value: show value
+
+head(colnames(coad_mir))
+
+
+sel_cols_c <- c(grep(pattern = "reads_per_million",
+                   x = colnames(coad_mir), 
+                   ignore.case = T, value = T))
+
+
+head(sel_cols_c)
+
+
+usedmirc <- coad_mir[, sel_cols_c]
+
+# Turn to Log From Linear
+# MARGIN = 2: Turn log that do not tranpose
+
+usedmirc <- apply(usedmirc, MARGIN = 2, FUN = function(x){log(x+1,base = 10)})
+
+
+# Remove to Unnecessary Part of The Title
+
+colnames(usedmirc) <- gsub(pattern = "reads_per_million_miRNA_mapped_",
+                          replacement = "",
+                          x = colnames(usedmirc))
+
+# Transpose miRNAseq Data
+
+t_mir_c <- usedmirc %>% 
+  t() %>% 
+  as.data.frame()
+
+# Transfer to miRNA ID Data As a Column
+# make.names: replace with "." instead of "_" in miRNA_ID names 
+
+colnames(t_mir_c) <- make.names(coad_mir$miRNA_ID)
+
+# Extract Sample ID
+
+t_mir_c <- t_mir_c %>% 
+  mutate(sample = substr(rownames(.),1,16)) %>% 
+  select(sample, everything())
+
+
+
+```
+
+
+```{r}
+
+
+# Transpose RNAseq Data
+
+t_rna_c <- data.frame(t(norm_rna_c))
+
+
+# Extract Sample ID and Add As a Column
+
+t_rna_c <- t_rna_c %>% 
+  mutate(sample = substr(rownames(.), 1,16)) %>% 
+  select(sample, everything())
+
+
+coad_subtype$patient %>% head()
+
+
+```
+
+
+# MERGING 
+
+```{r}
+
+merged_c <- full_join(t_rna_c, t_mir_c, by = "sample")
+
+merged2_c<-merged_c
+merged2_c$patient<-substr(merged2_c$sample, 1, 12)
+merged2_c %>% 
+  relocate(patient, sample)
+
+merged3_c <- full_join(merged2_c, coad_subtype, by = "patient")
+
+```
+
+
+```{r}
+
+library(ggplot2)
+
+library(ggpubr)
+
+# hsa.mir.155 vs CD8A (scatter)
+
+  merged3_c %>% 
+    ggscatter(
+      x = "hsa.mir.155",
+      y = "CD8A",
+      color = "pink",
+      title = "hsa.mir.155 VS CD8A in COAD")
+  
+  
+  merged3 %>% 
+    ggscatter(
+      x = "hsa.mir.155",
+      y = "CD8A",
+      title = "hsa.mir.155 VS CD8A in SKCM")
+  
+  
+# CD3E vs CD8A (scatter)
+  
+  merged3_c %>% 
+    ggscatter(
+      x = "CD3E",
+      y = "CD8A",
+      color = "pink",
+      title = "CD3E VS CD8A in COAD")
+  
+   merged3 %>% 
+    ggscatter(
+      x = "CD3E",
+      y = "CD8A",
+      title = "CD3E VS CD8A in SKCM")
+   
+
+saveRDS(merged3_c,"merged3_coad.rds")
+
+saveRDS(merged3,"merged3_skcm.rds")
+
+saveRDS(merged_c, "merged_coad.rds")
+
+saveRDS(merged, "merged_skcm.rds")
+
+```

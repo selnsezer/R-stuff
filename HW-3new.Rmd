@@ -1,0 +1,227 @@
+---
+title: "HW3"
+author: "Selin Sezer"
+date: "2022-08-17"
+output: html_document
+---
+```{r}
+
+library(tidyverse)
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(dplyr)
+library(edgeR)
+
+#Explore Data
+
+skcm_rna <- readRDS("skcm_rna.rds")
+
+skcm_mir <- readRDS("skcm_mir.rds")
+
+skcm_subtype <- readRDS("skcm_subtype.rds")
+
+dim(skcm_rna)
+
+```
+
+
+```{r}
+
+#Extract RNAseq Data
+
+rna <- assay(skcm_rna)
+
+rna[1:3, 1:3]
+
+```
+
+
+```{r}
+
+#Extract Gene Information
+
+gene_data <- as.data.frame(rowData(skcm_rna))
+
+gene_data[1:10, 1:10]
+
+
+anyDuplicated(gene_data$gene_name)
+
+sum(duplicated(gene_data$gene_name))
+
+dup_genes <- duplicated(gene_data$gene_name) | duplicated(gene_data$gene_name, fromLast=F)
+
+View(gene_data[dup_genes, ])
+
+```
+
+
+```{r}
+
+#Dealing with Duplicate gene_name
+
+gene_data <- gene_data %>% 
+  mutate(duplicated_name = duplicated(gene_name) | duplicated(gene_name, fromLast=T)) %>% 
+  mutate(new_name = case_when(
+    duplicated_name == TRUE ~ paste(gene_name, gene_id, sep = "_"),
+    duplicated_name == FALSE ~ gene_name)) %>% 
+  mutate(new_name = make.names(new_name))
+
+
+anyDuplicated(gene_data$gene_name)
+anyDuplicated(gene_data$new_name)
+
+
+```
+
+
+
+```{r, fig.width=8, fig.height=8}
+
+boxplot(rna[,1:10])
+
+boxplot(log1p(rna[,1:10]))
+
+
+
+norm_rna <- edgeR::cpm(rna)
+
+norm_rna <- log(norm_rna+1, base = 10)
+
+boxplot(norm_rna[, 1:10])
+
+dim(norm_rna)
+
+
+identical(rownames(norm_rna), gene_data$gene_id)
+
+rownames(norm_rna) <- gene_data$new_name
+
+# norm_rna2 <- edgeR::cpm(rna, log = TRUE, prior.count = 1) 
+# 
+# i <- 10
+# 
+# plot(norm_rna[,i], norm_rna2[,i])
+
+
+```
+
+
+```{r}
+
+# Extract Patient Data
+
+patient_data <- as.data.frame(colData(skcm_rna))
+
+patient_data[1:10, 1:10]
+
+anyDuplicated(patient_data$patient)
+
+which(duplicated(patient_data$patient))
+
+which(duplicated(patient_data$patient) | duplicated(patient_data$patient, fromLast=T))
+
+dup_patients <- which(duplicated(patient_data$patient) | duplicated(patient_data$patient, fromLast=T))
+
+View(patient_data[dup_patients, ])
+
+```
+
+
+```{r}
+
+# Extract miRNAseq Data
+# ignore.case: ignore uppercase and lowercase, x: search area, pattern: searching thing, value: show value
+
+head(colnames(skcm_mir))
+
+
+sel_cols <- c(grep(pattern = "reads_per_million",
+                   x = colnames(skcm_mir), 
+                   ignore.case = T, value = T))
+
+
+head(sel_cols)
+
+
+usedmir <- skcm_mir[, sel_cols]
+
+# Turn to Log From Linear
+# MARGIN = 2: Turn log that do not tranpose
+
+usedmir <- apply(usedmir, MARGIN = 2, FUN = function(x){log(x+1,base = 10)})
+
+dim(skcm_mir)
+
+dim(usedmir)
+
+# Remove to Unnecessary Part of The Title
+
+colnames(usedmir) <- gsub(pattern = "reads_per_million_miRNA_mapped_",
+                          replacement = "",
+                          x = colnames(usedmir))
+
+# Transpose miRNAseq Data
+
+t_mir <- usedmir %>% 
+  t() %>% 
+  as.data.frame()
+
+# Transfer to miRNA ID Data As a Column
+# make.names: replace with "." instead of "_" in miRNA_ID names 
+
+colnames(t_mir) <- make.names(skcm_mir$miRNA_ID)
+
+# Extract Sample ID
+
+t_mir <- t_mir %>% 
+  mutate(sample = substr(rownames(.),1,16)) %>% 
+  select(sample, everything())
+
+
+
+```
+
+
+
+```{r}
+
+# Transpose RNAseq Data
+
+t_rna <- data.frame(t(norm_rna))
+
+
+# Extract Sample ID and Add As a Column
+
+t_rna <- t_rna %>% 
+  mutate(sample = substr(rownames(.), 1,16)) %>% 
+  select(sample, everything())
+
+
+skcm_subtype$patient %>% head()
+
+
+```
+
+
+# MERGING 
+
+```{r}
+
+merged <- full_join(t_rna, t_mir, by = "sample")
+
+merged2<-merged
+merged2$patient<-substr(merged2$sample, 1, 12)
+merged2 %>% 
+  relocate(patient, sample)
+
+merged3 <- full_join(merged2, skcm_subtype, by = "patient")
+
+
+merged3 <- merged3 %>% distinct(sample, .keep_all = TRUE)
+
+merged3 <- subset(merged3, !is.na(sample))
+
+
+```
+

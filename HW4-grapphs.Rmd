@@ -1,0 +1,144 @@
+---
+title: "HW4-graphs"
+author: "Selin Sezer"
+date: "2022-08-31"
+output: html_document
+---
+
+```{r}
+
+merged_coad <- readRDS("merged3_coad.rds")
+
+merged_skcm <- readRDS("merged3_skcm.rds")
+
+library(dplyr)
+
+library(tidyverse)
+
+library(TCGAbiolinks)
+
+library(ggplot2)
+
+library(ggpubr)
+
+#Clean the duplicated data with last merged data
+
+merged_coad <- merged_coad %>% distinct(sample, .keep_all = TRUE)
+
+merged_coad <- subset(merged_coad, !is.na(sample))
+
+# hsa.mir.155 vs CD8A (scatter)
+
+   merged_coad %>% 
+     ggscatter(
+       x = "hsa.mir.155",
+       y = "CD8A",
+       color = "pink",
+       title = "hsa.mir.155 VS CD8A in COAD")
+   
+   
+   merged_skcm %>% 
+     ggscatter(
+       x = "hsa.mir.155",
+       y = "CD8A",
+       title = "hsa.mir.155 VS CD8A in SKCM")
+   
+   
+ # CD3E vs CD8A (scatter)
+   
+   merged_coad %>% 
+     ggscatter(
+       x = "CD3E",
+       y = "CD8A",
+       color = "pink",
+       title = "CD3E VS CD8A in COAD")
+   
+    merged_skcm %>% 
+     ggscatter(
+       x = "CD3E",
+       y = "CD8A",
+       title = "CD3E VS CD8A in SKCM")
+
+
+```
+
+
+```{r}
+
+# CD8A in two gender classes (male vs female) (boxplot with points overlaid)
+    
+    
+    ggboxplot (merged_coad, 
+              x = "gender",
+              y = "CD8A",
+              palette = "npg",
+              add = "dotplot",
+              color = "#619CFF",
+              fill = "#E76BF3",
+              na.rm = T,
+              title = "CD8A Gender Distribution",
+              select = c("FEMALE", "MALE"))
+    
+
+                
+ # Calculate an immune gene signature by averaging CD8A CD3E GZMB PRF1 and name this variable immune_signature (using normalized RNAseq data)
+ 
+merged_coad <- merged_coad %>% 
+  mutate(immune_signature = rowMeans(select(merged_coad, c(CD8A, CD3E, GZMB, PRF1))))
+
+# Column delete
+# merged_coad <- subset(merged_coad, select = -immune_signature)
+
+# immune_signature vs FOXP3
+
+ggplot(merged_coad, aes(immune_signature, FOXP3, colour = "class")) + 
+  geom_point(shape = 13, colour = "black", fill = "white", size = 3, stroke = 1)
+              
+
+```
+
+
+```{r}
+# Kaplan Meier curve with immune signature categorized at median value as high and low
+
+library(survival)
+library(survminer)
+library(lubridate)
+
+
+coad_surv <- merged_coad %>% select(sample, days_to_death, days_to_last_followup, vital_status, immune_signature)
+
+median_immune_sig <- median(coad_surv$immune_signature, na.rm = T)
+
+coad_surv <- coad_surv %>% 
+  dplyr::mutate(immune_categorise = case_when(
+    immune_signature > median_immune_sig ~ "high",
+    immune_signature < median_immune_sig ~ "low"
+  )) %>% 
+  dplyr::mutate(event = case_when(
+    is.na(days_to_death) == FALSE ~ days_to_death,
+    TRUE ~ days_to_last_followup
+  )) %>% 
+  dplyr::mutate(status = case_when(
+    vital_status == "LIVING" ~ 1,
+    vital_status == "DECEASED" ~ 0
+  ))
+
+```
+
+
+```{r}
+
+fit <- surv_fit(Surv(as.numeric(event, status)) ~ immune_categorise, data = coad_surv)
+
+ggsurvplot(fit, 
+           data = coad_surv, 
+           pval = TRUE, 
+           risk.table = TRUE, 
+           ggtheme = theme_dark(), 
+           main = "Survival Analysis")
+
+```
+
+
+
