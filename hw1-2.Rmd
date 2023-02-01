@@ -1,0 +1,108 @@
+---
+title: "Homework-1-2"
+author: "Selin Sezer"
+date: "2022-08-09"
+output: html_document
+---
+```{r}
+#1
+
+library(tidyverse)
+
+names(which.max(table(starwars$homeworld)))
+
+#2
+
+starwars %>% 
+  filter(species %in% c("Human")) %>% 
+  group_by(species) %>% 
+  summarize(average_mass = mean(mass, na.rm=T))
+
+#3
+
+starwars %>% 
+  filter(species %in% c("Human")) %>% 
+  group_by(species) %>% 
+  slice_max(mass, n = 3)
+
+
+starwars %>% 
+  filter(species %in% c("Droid")) %>% 
+  group_by(species) %>% 
+  slice_max(mass, n = 3)
+
+starwars %>% 
+  filter(species %in% c("Twi'lek")) %>% 
+  group_by(species) %>% 
+  slice_max(mass, n = 3)
+
+#4
+
+starwars %>% 
+  mutate(spc_hmw = paste(species, homeworld, sep = "_"))
+
+#5
+
+library(ggplot2)
+
+library(ggpubr)
+
+ggplot(starwars) + 
+  geom_dotplot(mapping = aes(species, height, color = "pink"))
+
+
+ggscatter(starwars, 
+x = "height", 
+y = "species",
+color = "green")
+
+
+#6
+
+
+df1 <- starwars %>% 
+      mutate_if(is.character, ~replace_na(.,"not_found"))
+
+#7
+
+starwars %>% 
+  mutate(smp_v = sample(1:10, size = 1, replace = FALSE)) %>% 
+  select(contains("color"))
+ 
+
+#8
+
+starwars %>% 
+  mutate(cont_s = nchar(homeworld, type = "chars", allowNA = FALSE))
+
+
+#9
+
+
+starwars %>% 
+  group_by(hair_color) %>% 
+  summarize(avr_heig = mean(height, na.rm=T)) %>% 
+  ggplot() + 
+   geom_point(mapping = aes(hair_color, avr_heig, color = "green"))
+
+#9.2
+
+starwars %>% 
+  group_by(hair_color) %>% 
+  summarize(avr_heig = mean(height, na.rm=T)) %>% 
+  ggscatter(
+    x = "hair_color",
+    y = "avr_heig",
+    color = "green",
+    fill = "orange")
+
+#10
+
+df <- data.frame(name = c("Owen Lars", "Jar Jar Binks", "Ric Olié", "Dooku", "Taun We"), age = sample(1:55, size = 5, replace = TRUE), genus = c("Norvec_Orman", "Tekir", "Tekir", "Chinchilla", "İran"), teeth = sample(1:801, size = 5, replace = TRUE))
+
+
+left_join(starwars, df)
+ 
+                    
+```
+
